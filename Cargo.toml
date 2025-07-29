@@ -1,7 +1,10 @@
 [package]
 name = "pomodoro_rs"
 version = "0.1.0"
+authors = ["Suppanat Timngarm <NeiwKai>"]
 edition = "2024"
+description = "A simple pomodoro application written in rust"
+repository = "https://github.com/NeiwKai/pomodoro_rs"
 
 [dependencies]
 eframe = "*"
