@@ -34,15 +34,12 @@ struct MyApp {
     run_state: RunState,
     running: bool,
     pause: bool,
-    time_sec: u64,
+    time_sec: f32,
     cur_lap: u8,
     cur_loop: u8,
-    rest_lap_min: u8,
-    rest_loop_min: u8,
-    
-    string_lap_dur_min: String,
-    string_rest_lap_min: String,
-    string_rest_loop_min: String,
+    lap_dur_min: f32,
+    rest_lap_min: f32,
+    rest_loop_min: f32,
 }
 
 impl Default for MyApp {
@@ -53,14 +50,12 @@ impl Default for MyApp {
             run_state: RunState::LAP,
             running: false, 
             pause: true,
-            time_sec: 25*60, 
+            time_sec: 25.0*60.0, 
             cur_lap: 0, 
             cur_loop: 0, 
-            rest_lap_min: 5, 
-            rest_loop_min: 30,
-            string_lap_dur_min: String::new(),
-            string_rest_lap_min: String::new(),
-            string_rest_loop_min: String::new(),
+            lap_dur_min: 25.0,
+            rest_lap_min: 5.0, 
+            rest_loop_min: 30.0,
         }
     }
 }
@@ -68,7 +63,7 @@ impl Default for MyApp {
 impl MyApp {
     fn steady(&mut self, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            let duration_time = format!("{:02}:{:02}", (self.time_sec%3600)/60, self.time_sec%60);
+            let duration_time = format!("{:02}:{:02}", (self.time_sec%3600.0)/60.0, self.time_sec%60.0);
             match self.run_state {
                 RunState::LAP => ui.label(egui::RichText::new("grinding...").font(egui::FontId::proportional(10.0))),
                 RunState::RestLap => ui.label(egui::RichText::new("lap resting...").font(egui::FontId::proportional(10.0))),
@@ -91,9 +86,6 @@ impl MyApp {
             if !self.running {
                 if ui.button(egui::RichText::new("⚙").font(egui::FontId::proportional(30.0))).clicked() {
                     self.app_state = State::SETTING;
-                    self.string_lap_dur_min = ((self.time_sec%3600)/60).to_string();
-                    self.string_rest_lap_min = self.rest_lap_min.to_string();
-                    self.string_rest_loop_min = self.rest_loop_min.to_string();
                 }
             } else if self.pause {
                 if ui.button(egui::RichText::new("⏹").font(egui::FontId::proportional(30.0))).clicked() {
@@ -109,24 +101,22 @@ impl MyApp {
             ui.add_space(50.0);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                 ui.label("Lap duration: ");
-                ui.add(egui::TextEdit::singleline(&mut self.string_lap_dur_min));
+                ui.add(egui::DragValue::new(&mut self.lap_dur_min).range(1.0..=59.0));
                 ui.label("minutes");
             });
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                 ui.label("Lap rest duration: ");
-                ui.add(egui::TextEdit::singleline(&mut self.string_rest_lap_min));
+                ui.add(egui::DragValue::new(&mut self.rest_lap_min).range(1.0..=59.0).speed(1.0));
                 ui.label("minutes");
             });
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                 ui.label("Loop rest duration: ");
-                ui.add(egui::TextEdit::singleline(&mut self.string_rest_loop_min));
+                ui.add(egui::DragValue::new(&mut self.rest_loop_min).range(1.0..=59.0).speed(1.0));
                 ui.label("minutes");
             });
             ui.add_space(25.0);
             if ui.button("confirm").clicked() {
-                self.time_sec = self.string_lap_dur_min.parse::<u64>().unwrap() * 60;
-                self.rest_lap_min = self.string_rest_lap_min.parse::<u8>().unwrap();
-                self.rest_loop_min = self.string_rest_loop_min.parse::<u8>().unwrap();
+                self.time_sec = self.lap_dur_min * 60.0;
                 self.app_state = State::STEADY;
             }
         });
@@ -139,21 +129,21 @@ impl eframe::App for MyApp {
             ctx.request_repaint();
             if self.last_update.elapsed() >= Duration::from_secs(1) {
                 self.last_update = Instant::now();
-                self.time_sec -= 1;
+                self.time_sec -= 1.0;
 
-                if self.time_sec <= 0 && self.run_state == RunState::LAP {
+                if self.time_sec <= 0.0 && self.run_state == RunState::LAP {
                     self.cur_lap += 1;
                     if self.cur_lap > 3 {
-                        self.time_sec = u64::from(self.rest_loop_min)*60;
+                        self.time_sec = self.rest_loop_min*60.0;
                         self.run_state = RunState::RestLoop;
                         self.cur_lap = 0;
                         self.cur_loop += 1;
                     } else {
-                        self.time_sec = u64::from(self.rest_lap_min)*60;
+                        self.time_sec = self.rest_lap_min*60.0;
                         self.run_state = RunState::RestLap;
                     }
-                } else if self.time_sec <= 0 && self.run_state != RunState::LAP {
-                    self.time_sec = self.string_lap_dur_min.parse::<u64>().unwrap() * 60;
+                } else if self.time_sec <= 0.0 && self.run_state != RunState::LAP {
+                    self.time_sec = self.lap_dur_min * 60.0;
                     self.run_state = RunState::LAP;
                 } 
             }
