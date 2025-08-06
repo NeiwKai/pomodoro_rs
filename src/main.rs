@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 use eframe::egui;
+use notify_rust::{Notification, Hint};
 
 
 fn main() -> eframe::Result<()> {
@@ -63,7 +64,7 @@ impl Default for MyApp {
 impl MyApp {
     fn steady(&mut self, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            let duration_time = format!("{:02}:{:02}", (self.time_sec%3600.0)/60.0, self.time_sec%60.0);
+            let duration_time = format!("{:02}:{:02}", ((self.time_sec%3600.0)/60.0) as u64, self.time_sec%60.0);
             match self.run_state {
                 RunState::LAP => ui.label(egui::RichText::new("grinding...").font(egui::FontId::proportional(10.0))),
                 RunState::RestLap => ui.label(egui::RichText::new("lap resting...").font(egui::FontId::proportional(10.0))),
@@ -132,6 +133,14 @@ impl eframe::App for MyApp {
                 self.time_sec -= 1.0;
 
                 if self.time_sec <= 0.0 && self.run_state == RunState::LAP {
+                    self.pause = true;
+                    let _ = Notification::new()
+                        .summary("Pomodoro")
+                        .body("Time out! Please check your tomato!")
+                        .appname("pomodoro")
+                        .hint(Hint::Resident(true))
+                        .timeout(0)
+                        .show();
                     self.cur_lap += 1;
                     if self.cur_lap > 3 {
                         self.time_sec = self.rest_loop_min*60.0;
