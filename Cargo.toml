@@ -9,3 +9,4 @@ repository = "https://github.com/NeiwKai/pomodoro_rs"
 [dependencies]
 eframe = "*"
 egui = "*"
+notify-rust = "4"
