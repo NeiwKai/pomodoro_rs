@@ -1,7 +1,8 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
     thread,
-    time::{Duration, Instant}
+    thread::JoinHandle,
+    time::Duration
 };
 use eframe::egui;
 use notify_rust::{Notification, Hint};
@@ -34,7 +35,6 @@ enum RunState {
 }
 
 struct MyApp {
-    last_update: Instant,
     app_state: State,
     run_state: RunState,
     running: bool,
@@ -45,12 +45,14 @@ struct MyApp {
     lap_dur_min: u32,
     rest_lap_min: u32,
     rest_loop_min: u32,
+    pause_flag: Arc<AtomicBool>,
+    thread_done_flag: Arc<AtomicBool>,
+    child_process: Option<JoinHandle<()>>,
 }
 
 impl Default for MyApp {
     fn default() -> Self {
         Self {
-            last_update: Instant::now(),
             app_state: State::STEADY,
             run_state: RunState::LAP,
             running: false, 
@@ -61,6 +63,9 @@ impl Default for MyApp {
             lap_dur_min: 25,
             rest_lap_min: 5, 
             rest_loop_min: 30,
+            pause_flag: Arc::new(AtomicBool::new(false)),
+            thread_done_flag: Arc::new(AtomicBool::new(false)),
+            child_process: None,
         }
     }
 }
@@ -80,22 +85,36 @@ impl MyApp {
             ui.add_space(100.0);
             if self.pause {
                 if ui.button(egui::RichText::new("▶").font(egui::FontId::proportional(30.0))).clicked() {
+                    self.pause = false; 
+                    self.running = true;
+
                     let thread_time = Arc::clone(&self.time_sec);
-                    thread::spawn(move || {
+                    let thread_done_flag = Arc::clone(&self.thread_done_flag);
+                    let pause_flag = Arc::clone(&self.pause_flag);
+
+                    self.pause_flag.store(false, Ordering::Relaxed);
+
+                    let child = thread::spawn(move || {
                         loop {
+                            if pause_flag.load(Ordering::Relaxed) {
+                                break;
+                            }
                             thread::sleep(Duration::from_secs(1));
                             let mut t = thread_time.lock().unwrap();
                             if *t > 0 {
                                 *t -= 1;
                             }
                         }
+                        thread_done_flag.store(true, Ordering::Relaxed);
                     });
-                    self.pause = false; 
-                    self.running = true;
+
+                    self.child_process = Some(child);
                 }
             } else {
                 if ui.button(egui::RichText::new("⏸").font(egui::FontId::proportional(30.0))).clicked() {
                     self.pause = true; 
+
+                    self.pause_flag.store(true, Ordering::Relaxed);
                 }
             } 
             ui.add_space(20.0);
@@ -141,6 +160,7 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.request_repaint_after(Duration::from_millis(500));
         let time = *self.time_sec.lock().unwrap();
         if self.running && !self.pause {
             if time <= 0 && self.run_state == RunState::LAP {
@@ -173,6 +193,13 @@ impl eframe::App for MyApp {
                 State::SETTING => self.setting(ui),
             }
         });
-        ctx.request_repaint_after(Duration::from_millis(500));
+
+        // ✅ Check if background thread ended and clean up
+        if self.thread_done_flag.load(Ordering::Relaxed) {
+            if let Some(child) = self.child_process.take() {
+                let _ = child.join(); // safe: thread already exited
+            }
+            self.thread_done_flag.store(false, Ordering::Relaxed); // reset
+        }
     }
 }
