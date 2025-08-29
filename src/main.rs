@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant}
+};
 use eframe::egui;
 use notify_rust::{Notification, Hint};
 
@@ -35,12 +39,12 @@ struct MyApp {
     run_state: RunState,
     running: bool,
     pause: bool,
-    time_sec: f32,
+    time_sec: Arc<Mutex<u32>>,
     cur_lap: u8,
     cur_loop: u8,
-    lap_dur_min: f32,
-    rest_lap_min: f32,
-    rest_loop_min: f32,
+    lap_dur_min: u32,
+    rest_lap_min: u32,
+    rest_loop_min: u32,
 }
 
 impl Default for MyApp {
@@ -51,20 +55,21 @@ impl Default for MyApp {
             run_state: RunState::LAP,
             running: false, 
             pause: true,
-            time_sec: 25.0*60.0, 
+            time_sec: Arc::new(Mutex::new(25*60)), 
             cur_lap: 0, 
             cur_loop: 0, 
-            lap_dur_min: 25.0,
-            rest_lap_min: 5.0, 
-            rest_loop_min: 30.0,
+            lap_dur_min: 25,
+            rest_lap_min: 5, 
+            rest_loop_min: 30,
         }
     }
 }
 
 impl MyApp {
     fn steady(&mut self, ui: &mut egui::Ui) {
+        let time = *self.time_sec.lock().unwrap();
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            let duration_time = format!("{:02}:{:02}", ((self.time_sec%3600.0)/60.0) as u64, self.time_sec%60.0);
+            let duration_time = format!("{:02}:{:02}", time/60, time%60);
             match self.run_state {
                 RunState::LAP => ui.label(egui::RichText::new("grinding...").font(egui::FontId::proportional(10.0))),
                 RunState::RestLap => ui.label(egui::RichText::new("lap resting...").font(egui::FontId::proportional(10.0))),
@@ -75,6 +80,16 @@ impl MyApp {
             ui.add_space(100.0);
             if self.pause {
                 if ui.button(egui::RichText::new("▶").font(egui::FontId::proportional(30.0))).clicked() {
+                    let thread_time = Arc::clone(&self.time_sec);
+                    thread::spawn(move || {
+                        loop {
+                            thread::sleep(Duration::from_secs(1));
+                            let mut t = thread_time.lock().unwrap();
+                            if *t > 0 {
+                                *t -= 1;
+                            }
+                        }
+                    });
                     self.pause = false; 
                     self.running = true;
                 }
@@ -102,22 +117,22 @@ impl MyApp {
             ui.add_space(50.0);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                 ui.label("Lap duration: ");
-                ui.add(egui::DragValue::new(&mut self.lap_dur_min).range(1.0..=59.0));
+                ui.add(egui::DragValue::new(&mut self.lap_dur_min).range(1..=59));
                 ui.label("minutes");
             });
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                 ui.label("Lap rest duration: ");
-                ui.add(egui::DragValue::new(&mut self.rest_lap_min).range(1.0..=59.0).speed(1.0));
+                ui.add(egui::DragValue::new(&mut self.rest_lap_min).range(1..=59).speed(1));
                 ui.label("minutes");
             });
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                 ui.label("Loop rest duration: ");
-                ui.add(egui::DragValue::new(&mut self.rest_loop_min).range(1.0..=59.0).speed(1.0));
+                ui.add(egui::DragValue::new(&mut self.rest_loop_min).range(1..=59).speed(1));
                 ui.label("minutes");
             });
             ui.add_space(25.0);
             if ui.button("confirm").clicked() {
-                self.time_sec = self.lap_dur_min * 60.0;
+                self.time_sec = Arc::new(Mutex::new(self.lap_dur_min * 60));
                 self.app_state = State::STEADY;
             }
         });
@@ -126,36 +141,31 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let time = *self.time_sec.lock().unwrap();
         if self.running && !self.pause {
-            ctx.request_repaint();
-            if self.last_update.elapsed() >= Duration::from_secs(1) {
-                self.last_update = Instant::now();
-                self.time_sec -= 1.0;
-
-                if self.time_sec <= 0.0 && self.run_state == RunState::LAP {
-                    self.pause = true;
-                    let _ = Notification::new()
-                        .summary("Pomodoro")
-                        .body("Time out! Please check your tomato!")
-                        .appname("pomodoro")
-                        .hint(Hint::Resident(true))
-                        .timeout(0)
-                        .show();
-                    self.cur_lap += 1;
-                    if self.cur_lap > 3 {
-                        self.time_sec = self.rest_loop_min*60.0;
-                        self.run_state = RunState::RestLoop;
-                        self.cur_lap = 0;
-                        self.cur_loop += 1;
-                    } else {
-                        self.time_sec = self.rest_lap_min*60.0;
-                        self.run_state = RunState::RestLap;
-                    }
-                } else if self.time_sec <= 0.0 && self.run_state != RunState::LAP {
-                    self.time_sec = self.lap_dur_min * 60.0;
-                    self.run_state = RunState::LAP;
-                } 
-            }
+            if time <= 0 && self.run_state == RunState::LAP {
+                self.pause = true;
+                let _ = Notification::new()
+                    .summary("Pomodoro")
+                    .body("Time out! Please check your tomato!")
+                    .appname("pomodoro")
+                    .hint(Hint::Resident(true))
+                    .timeout(0)
+                    .show();
+                self.cur_lap += 1;
+                if self.cur_lap > 3 {
+                    self.time_sec = Arc::new(Mutex::new(self.rest_loop_min*60));
+                    self.run_state = RunState::RestLoop;
+                    self.cur_lap = 0;
+                    self.cur_loop += 1;
+                } else {
+                    self.time_sec = Arc::new(Mutex::new(self.rest_lap_min*60));
+                    self.run_state = RunState::RestLap;
+                }
+            } else if time <= 0 && self.run_state != RunState::LAP {
+                self.time_sec = Arc::new(Mutex::new(self.lap_dur_min * 60));
+                self.run_state = RunState::LAP;
+            } 
         }
         egui::CentralPanel::default().show(ctx, |ui: &mut egui::Ui| {
             match self.app_state {
@@ -163,5 +173,6 @@ impl eframe::App for MyApp {
                 State::SETTING => self.setting(ui),
             }
         });
+        ctx.request_repaint_after(Duration::from_millis(500));
     }
 }
